@@ -163,33 +163,35 @@
     }
 
     function renderTriage(data) {
-      const hits = data?.triage?.hits || [];
-      const container = $("triageResults");
+      const hits = data?.triage?.hits || data?.case?.triage_snapshot?.hits || [];
+      const container = document.getElementById("triageResults");
 
       if (!hits.length) {
-        container.innerHTML = "<p class='muted'>No triage hits returned.</p>";
-        return;
-      }
-
-      container.innerHTML = hits.map((hit, i) => `
-        <div class="case-item" style="cursor:default;">
-          <strong>#${i + 1} ${hit.name || "Unnamed Rule"}</strong>
-          <div class="muted">Category: ${hit.category || "n/a"} | Score: ${hit.score ?? "n/a"}</div>
-
-          <div style="margin-top:10px;"><strong>Likely causes</strong></div>
-          <div>
-            ${(hit.probable_causes || []).map(c => `
-              <span class="pill">${c.cause} (${c.weight})</span>
-            `).join("") || "<span class='muted'>None</span>"}
-          </div>
-
-          <div style="margin-top:10px;"><strong>Suggested checks</strong></div>
-          <ul>
-            ${(hit.suggested_checks || []).map(x => `<li>${x}</li>`).join("") || "<li>No checks returned</li>"}
-          </ul>
-        </div>
-      `).join("");
+      container.innerHTML = "<p class='muted'>No triage hits returned.</p>";
+      return;
     }
+
+    container.innerHTML = hits.map((hit, i) => `
+    <div class="case-item" style="cursor:default;">
+      <strong>#${i + 1} ${hit.name || "Unnamed Rule"}</strong>
+      <div class="muted">
+        Score: ${hit.score ?? "n/a"}
+        ${hit.matched?.length ? ` | Matched: ${hit.matched.join(", ")}` : ""}
+      </div>
+
+      <div style="margin-top:10px;"><strong>Likely causes</strong></div>
+      <ul>
+        ${(hit.likely_causes || []).map(c => `<li>${c}</li>`).join("") || "<li>None</li>"}
+      </ul>
+
+      <div style="margin-top:10px;"><strong>Suggested checks</strong></div>
+      <ul>
+        ${(hit.checks || []).map(x => `<li>${x}</li>`).join("") || "<li>No checks returned</li>"}
+      </ul>
+    </div>
+  `).join("");
+}
+</script>
 
     async function loadCases() {
       try {
