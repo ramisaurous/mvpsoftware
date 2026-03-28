@@ -1,300 +1,408 @@
-# app/core/triage.py
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from app.core.db import get_session
-
-
-@dataclass
-class TriageHit:
-    rule_id: str
-    name: str
-    score: float
-    likely_causes: list[str]
-    checks: list[str]
-    matched: list[str]
+from app.core.db import engine
+from app.core.symptom_parser import ParsedSymptoms, parse_symptoms
+from app.models.triage_rule import TriageRule
 
 
-# ----------------------------
-# Fallback rules (no DB needed)
-# ----------------------------
-
-_FALLBACK_RULES: list[dict[str, Any]] = [
+# Legacy rules still help catch common cases even if DB KB is incomplete.
+_RULES: list[dict[str, Any]] = [
     {
-        "rule_id": "fallback_misfire_rough_idle",
-        "name": "Misfire / rough idle",
-        "keywords": ["rough idle", "misfire", "stumble", "hesitation", "shaking at idle"],
-        "dtc_prefixes": ["P030", "P017", "P010", "P011"],
-        "likely_causes": [
-            "Ignition: plugs/coils",
-            "Vacuum leak / unmetered air",
-            "MAF contamination",
-            "Fuel trim issue / weak fuel delivery",
+        "id": "misfire_fuel_air",
+        "title": "Misfire / Fuel / Air / Ignition",
+        "dtc_any": ["P0300", "P0301", "P0302", "P0303", "P0304", "P0305", "P0306", "P0307", "P0308"],
+        "symptoms_any": ["rough idle", "misfire", "shake", "stumble", "lack of power"],
+        "causes": [
+            ("Ignition coil / plug / wire issue", 0.42),
+            ("Injector issue / fueling imbalance", 0.28),
+            ("Vacuum leak / unmetered air", 0.18),
+            ("AFM/DFM lifter/cam concern (platform-specific)", 0.12),
         ],
-        "checks": [
-            "Scan fuel trims STFT/LTFT at idle and 2500 RPM; look for big delta (vacuum leak signature).",
-            "Check misfire counters by cylinder; swap coil to see if misfire follows.",
-            "Inspect intake/vacuum lines; smoke test if trims high.",
-            "Inspect/clean MAF; verify air filter and ducting sealed.",
+        "programming": [
+            "Verify ECM calibration is current; check for misfire-related updated calibrations if available."
         ],
-        "base_weight": 1.2,
+        "preflight": [
+            "Battery support 13.2–14.2V, 70A+",
+            "Record freeze frame / mode $06",
+            "Check for aftermarket tune; document before changes",
+        ],
     },
     {
-        "rule_id": "fallback_no_start_crank",
-        "name": "Crank/no-start",
-        "keywords": ["cranks but wont start", "cranks but won't start", "no start", "won't start", "dead"],
-        "dtc_prefixes": ["P06", "P0A", "U0"],
-        "likely_causes": [
-            "Battery/voltage issue",
-            "Fuel delivery issue",
-            "Security/immobilizer",
-            "Crank/cam signal issue",
+        "id": "o2_fuel_trim",
+        "title": "Fuel Trim / O2 / Intake Leaks",
+        "dtc_any": ["P0171", "P0174", "P0131", "P0151", "P0137", "P0157"],
+        "symptoms_any": ["poor mpg", "lean", "hesitation", "surge"],
+        "causes": [
+            ("Unmetered air / intake leak", 0.40),
+            ("Exhaust leak upstream of O2", 0.20),
+            ("A/F sensor or O2 sensor issue", 0.25),
+            ("Fuel delivery issue (pump/filter/reg)", 0.15),
         ],
-        "checks": [
-            "Check battery voltage and cranking voltage drop.",
-            "Verify fuel pressure (spec) and injector pulse.",
-            "Check for security indicator / immobilizer faults.",
-            "Look for RPM signal while cranking; check CKP/CMP related DTCs.",
+        "programming": [
+            "Check for ECM updates affecting fuel trim / sensor rationality."
         ],
-        "base_weight": 1.1,
+        "preflight": [
+            "Smoke test intake",
+            "Verify MAF cleanliness / plausibility",
+            "Fuel pressure under load",
+        ],
     },
     {
-        "rule_id": "fallback_vibration_highway",
-        "name": "Highway speed vibration",
-        "keywords": ["vibration", "shake", "shudder", "steering wheel shakes", "vibrate"],
-        "dtc_prefixes": [],
-        "likely_causes": [
-            "Wheel/tire imbalance",
-            "Tire belt separation / out-of-round",
-            "Driveline/prop shaft imbalance",
+        "id": "evap",
+        "title": "EVAP System",
+        "dtc_any": ["P0442", "P0455", "P0456", "P0496"],
+        "symptoms_any": ["check engine", "fuel smell", "stall at stop", "stalls at stop"],
+        "causes": [
+            ("Loose/failed gas cap or seal", 0.25),
+            ("EVAP purge valve stuck/leaking", 0.35),
+            ("EVAP vent valve / canister issue", 0.25),
+            ("Leak in EVAP lines", 0.15),
         ],
-        "checks": [
-            "Confirm speed range (55–75 mph) and whether it changes under throttle/coast.",
-            "Inspect tires for cupping/bulges; rotate front↔rear and retest.",
-            "Balance/road-force balance; check wheel runout.",
-            "If load-dependent, inspect driveline angles / prop shaft.",
+        "programming": [
+            "No programming typically required; verify no bulletin requiring ECM logic update."
         ],
-        "base_weight": 1.0,
+        "preflight": [
+            "Run EVAP service bay test if supported",
+            "Inspect purge command vs STFT response",
+        ],
     },
     {
-        "rule_id": "fallback_overheat",
-        "name": "Overheating / high temp",
-        "keywords": ["overheat", "hot", "temperature high", "temp high", "coolant boiling"],
-        "dtc_prefixes": ["P012", "P021", "P148"],
-        "likely_causes": [
-            "Low coolant / air pocket",
-            "Thermostat issue",
-            "Cooling fan control issue",
-            "Radiator restriction",
+        "id": "network_uds",
+        "title": "Network / U-Codes / Module Comms",
+        "dtc_any": ["U0100", "U0121", "U0140", "U0151", "U0184", "U0401", "U0415"],
+        "symptoms_any": ["no start", "multiple lights", "loss of comm", "service safety", "service stabilitrak"],
+        "causes": [
+            ("Low voltage / battery / grounds", 0.45),
+            ("CAN bus wiring/connectors", 0.25),
+            ("Module reset / software anomaly", 0.20),
+            ("Failed module (confirm with pinpoint tests)", 0.10),
         ],
-        "checks": [
-            "Check coolant level and bleed air; pressure test for leaks.",
-            "Verify thermostat operation (temp rise behavior).",
-            "Command fans on with scan tool; verify relays/fuses.",
-            "Check radiator/condenser airflow and external blockage.",
+        "programming": [
+            "If symptoms intermittent and voltage stable: consider module reprogram/update path with human approval."
         ],
-        "base_weight": 1.1,
+        "preflight": [
+            "Battery & grounds load test",
+            "Network health check / topology if tool supports",
+        ],
+    },
+    {
+        "id": "trans_tcc",
+        "title": "Transmission / TCC / Shift Quality",
+        "dtc_any": ["P0741", "P0796", "P07A3", "P07A5"],
+        "symptoms_any": ["shudder", "flare", "hard shift", "slip"],
+        "causes": [
+            ("Fluid condition / wrong fluid / aeration", 0.35),
+            ("Valve body / solenoid concern", 0.30),
+            ("Converter clutch issue", 0.20),
+            ("Software / adapts (needs procedure)", 0.15),
+        ],
+        "programming": [
+            "If supported: perform TCM update and relearn procedure with battery maintainer."
+        ],
+        "preflight": [
+            "Document fluid level/condition",
+            "Road test with data log",
+            "Check for service bulletins",
+        ],
     },
 ]
 
+_GENERIC_PRECHECK = [
+    "Stable power supply (programming): 13.2–14.2V, 70A+",
+    "Internet stable; disable sleep/hibernation on laptop",
+    "Record existing module IDs / calibrations before changes",
+    "Confirm customer authorization + RO notes",
+]
 
-# ----------------------------
-# Public API
-# ----------------------------
+
+@dataclass(frozen=True)
+class TriageHit:
+    rule_id: str
+    title: str
+    confidence: float
+    probable_causes: list[dict[str, Any]]
+    programming_recommendation: list[str]
+    preflight_checklist: list[str]
+
 
 def triage(
-    dtcs: list[str] | None,
-    symptoms: list[str] | None,
+    dtcs: list[str],
+    symptoms: list[str],
     platform: str | None,
     engine: str | None,
     learned_weights: dict[str, float] | None = None,
 ) -> list[TriageHit]:
-    """
-    Returns ranked triage hits.
-
-    - First attempts KB-based triage using DB rules (TriageRule table).
-    - If DB/K B query fails for ANY reason, falls back to static rules.
-    """
+    dtc_set = {d.upper().strip() for d in (dtcs or []) if d and d.strip()}
+    symptom_list = [s.strip() for s in (symptoms or []) if s and s.strip()]
+    symptom_text = " | ".join(symptom_list).lower()
     learned_weights = learned_weights or {}
 
-    dtc_set = {(_norm(d) or "") for d in (dtcs or []) if _norm(d)}
-    sym_text = " | ".join([_norm(s) for s in (symptoms or []) if _norm(s)])
-    sym_lower = sym_text.lower()
+    hits: list[TriageHit] = []
 
-    # 1) Try KB triage (DB)
-    kb_hits = _triage_with_kb_safe(
-        dtc_set=dtc_set,
-        symptom_text=sym_lower,
-        platform=_norm(platform),
-        engine=_norm(engine),
-        learned_weights=learned_weights,
+    # Legacy rules
+    for rule in _RULES:
+        dtc_hit_count = len({c.upper() for c in rule["dtc_any"]}.intersection(dtc_set))
+        symptom_hit_count = sum(
+            1 for phrase in rule["symptoms_any"]
+            if phrase.lower() in symptom_text
+        )
+
+        if dtc_hit_count == 0 and symptom_hit_count == 0:
+            continue
+
+        score = 0.18
+        score += min(0.40, 0.18 * dtc_hit_count)
+        score += min(0.24, 0.08 * symptom_hit_count)
+        if platform:
+            score += 0.02
+        if engine and engine.strip():
+            score += 0.01
+
+        score *= float(learned_weights.get(rule["id"], 1.0))
+        score = _clamp_score(score)
+
+        cause_weight_bonus = min(0.15, 0.04 * dtc_hit_count + 0.02 * symptom_hit_count)
+        causes = [
+            {"cause": name, "weight": round(base_weight + cause_weight_bonus, 3)}
+            for (name, base_weight) in rule["causes"]
+        ]
+        causes.sort(key=lambda x: x["weight"], reverse=True)
+
+        hits.append(
+            TriageHit(
+                rule_id=rule["id"],
+                title=rule["title"],
+                confidence=score,
+                probable_causes=causes,
+                programming_recommendation=list(rule["programming"]),
+                preflight_checklist=_merge_unique(rule["preflight"], _GENERIC_PRECHECK),
+            )
+        )
+
+    # DB KB rules
+    parsed = _parse_symptom_input(symptom_list)
+    hits.extend(
+        _triage_with_kb(
+            dtcs=list(dtc_set),
+            parsed=parsed,
+            symptom_text=symptom_text,
+            platform=platform,
+            engine=engine,
+        )
     )
-    if kb_hits:
-        return kb_hits
 
-    # 2) Fallback triage (no DB)
-    return _triage_with_fallback(
-        dtc_set=dtc_set,
-        symptom_text=sym_lower,
-        learned_weights=learned_weights,
-    )
+    # Deduplicate near-identical titles, keeping the highest confidence hit
+    best_by_title: dict[str, TriageHit] = {}
+    for hit in hits:
+        existing = best_by_title.get(hit.title)
+        if existing is None or hit.confidence > existing.confidence:
+            best_by_title[hit.title] = hit
+
+    final_hits = list(best_by_title.values())
+    final_hits.sort(key=lambda h: h.confidence, reverse=True)
+    return final_hits[:8]
 
 
-# ----------------------------
-# KB triage (safe)
-# ----------------------------
+def _parse_symptom_input(symptom_list: list[str]) -> ParsedSymptoms:
+    text = " ".join(symptom_list)
+    return parse_symptoms(text)
 
-def _triage_with_kb_safe(
-    dtc_set: set[str],
+
+def _triage_with_kb(
+    dtcs: list[str],
+    parsed: ParsedSymptoms,
     symptom_text: str,
     platform: str | None,
     engine: str | None,
-    learned_weights: dict[str, float],
 ) -> list[TriageHit]:
-    """
-    Safe wrapper that will NEVER raise; returns [] if KB can’t be queried.
-    This avoids 500s when the KB session/model isn’t bound correctly.
-    """
-    try:
-        # Import inside try so missing model doesn’t crash startup/requests
-        from app.models.triage_rule import TriageRule  # type: ignore
-    except Exception:
-        return []
+    dtc_set = {d.upper().strip() for d in (dtcs or []) if d and d.strip()}
+    tags = {t.lower() for t in (parsed.tags or [])}
+    contexts = {c.lower() for c in (parsed.attrs.get("contexts") or [])}
+    speed_min_mph = parsed.attrs.get("speed_min_mph")
 
-    try:
-        with get_session() as session:
-            rules = session.exec(select(TriageRule)).all()
-    except Exception:
-        # This is where you were blowing up with UnboundExecutionError
-        return []
+    with Session(engine) as session:
+        rules = session.exec(select(TriageRule)).all()
 
-    hits: list[TriageHit] = []
+    out: list[TriageHit] = []
+
     for r in rules:
-        # Be defensive: DB rows might not have all fields populated
-        rule_id = getattr(r, "id", None) or getattr(r, "rule_id", None) or getattr(r, "name", "rule")
-        name = getattr(r, "name", str(rule_id))
+        required_tags = {t.lower().strip() for t in (r.required_tags or []) if t and t.strip()}
+        optional_tags = {t.lower().strip() for t in (r.optional_tags or []) if t and t.strip()}
+        contexts_any = {c.lower().strip() for c in (r.contexts_any or []) if c and c.strip()}
+        dtcs_any = {d.upper().strip() for d in (r.dtcs_any or []) if d and d.strip()}
 
-        required_dtcs = set([_norm(x) for x in (getattr(r, "required_dtcs", None) or []) if _norm(x)])
-        required_tags = set([_norm(x) for x in (getattr(r, "required_tags", None) or []) if _norm(x)])
-        optional_tags = set([_norm(x) for x in (getattr(r, "optional_tags", None) or []) if _norm(x)])
-
-        # Quick keyword tagging from symptom_text
-        tags = _infer_tags(symptom_text)
-
-        # Required gates
-        if required_dtcs and not (required_dtcs & dtc_set):
-            continue
-        if required_tags and not (required_tags <= tags):
+        # If rule has required tags, they must all be present.
+        if required_tags and not required_tags.issubset(tags):
             continue
 
-        # Platform/engine gates (if rule specifies)
-        rule_platforms = set([_norm(x) for x in (getattr(r, "platforms", None) or []) if _norm(x)])
-        rule_engines = set([_norm(x) for x in (getattr(r, "engines", None) or []) if _norm(x)])
-        if rule_platforms and platform and platform not in rule_platforms:
+        required_tag_hits = len(required_tags.intersection(tags))
+        optional_tag_hits = len(optional_tags.intersection(tags))
+        context_hits = len(contexts_any.intersection(contexts))
+        dtc_hits = len(dtcs_any.intersection(dtc_set))
+
+        # Lightweight text fallback so phrasing variants still catch.
+        text_hint_hits = _count_text_hints(
+            rule_name=r.name,
+            category=r.category,
+            likely_causes=r.likely_causes or [],
+            symptom_text=symptom_text,
+        )
+
+        # Skip dead matches:
+        # - if rule has required tags, it already passed
+        # - if no required tags, require at least one of dtc/context/optional/text hint
+        if not required_tags and (optional_tag_hits + context_hits + dtc_hits + text_hint_hits) == 0:
             continue
-        if rule_engines and engine and engine not in rule_engines:
-            continue
 
-        base_weight = float(getattr(r, "base_weight", 1.0) or 1.0)
-        learned_mult = float(learned_weights.get(str(rule_id), 1.0))
-        bonus = 0.0
-        if optional_tags:
-            bonus += 0.15 * len(optional_tags & tags)
+        score = 0.12
 
-        score = round(base_weight * learned_mult + bonus, 4)
+        # Required tags are strongest
+        if required_tag_hits:
+            score += 0.34 + min(0.12, 0.04 * required_tag_hits)
 
-        likely_causes = list(getattr(r, "likely_causes", None) or [])
-        checks = list(getattr(r, "checks", None) or [])
+        # Optional tags still matter
+        if optional_tag_hits:
+            score += min(0.20, 0.07 * optional_tag_hits)
 
-        hits.append(
+        # DTC overlap is strong
+        if dtc_hits:
+            score += 0.18 + min(0.12, 0.04 * dtc_hits)
+
+        # Context helps narrow it
+        if context_hits:
+            score += min(0.12, 0.05 * context_hits)
+
+        # Text hint fallback helps catch wording weirdness
+        if text_hint_hits:
+            score += min(0.12, 0.04 * text_hint_hits)
+
+        # Speed threshold
+        if r.min_speed_mph is not None and speed_min_mph is not None:
+            try:
+                if int(speed_min_mph) >= int(r.min_speed_mph):
+                    score += 0.08
+            except (TypeError, ValueError):
+                pass
+
+        if platform:
+            score += 0.02
+        if engine and str(engine).strip():
+            score += 0.01
+
+        score *= float(r.base_weight or 1.0)
+        score = _clamp_score(score)
+
+        probable_causes = _weighted_causes(
+            causes=r.likely_causes or [],
+            required_tag_hits=required_tag_hits,
+            optional_tag_hits=optional_tag_hits,
+            dtc_hits=dtc_hits,
+            context_hits=context_hits,
+            text_hint_hits=text_hint_hits,
+        )
+
+        out.append(
             TriageHit(
-                rule_id=str(rule_id),
-                name=str(name),
-                score=score,
-                likely_causes=[str(x) for x in likely_causes],
-                checks=[str(x) for x in checks],
-                matched=sorted(list((required_tags | optional_tags) & tags)),
+                rule_id=f"kb:{r.id}",
+                title=f"{r.name} (KB)",
+                confidence=score,
+                probable_causes=probable_causes,
+                programming_recommendation=[],
+                preflight_checklist=_merge_unique(list(r.checks or []), _GENERIC_PRECHECK),
             )
         )
 
-    hits.sort(key=lambda h: h.score, reverse=True)
-    return hits[:20]
+    out.sort(key=lambda h: h.confidence, reverse=True)
+    return out[:8]
 
 
-# ----------------------------
-# Fallback triage
-# ----------------------------
+def _weighted_causes(
+    causes: list[str],
+    required_tag_hits: int,
+    optional_tag_hits: int,
+    dtc_hits: int,
+    context_hits: int,
+    text_hint_hits: int,
+) -> list[dict[str, Any]]:
+    clean_causes = [c.strip() for c in causes if c and c.strip()]
+    if not clean_causes:
+        return []
 
-def _triage_with_fallback(
-    dtc_set: set[str],
+    signal_bonus = (
+        0.03 * required_tag_hits
+        + 0.02 * optional_tag_hits
+        + 0.04 * dtc_hits
+        + 0.02 * context_hits
+        + 0.01 * text_hint_hits
+    )
+
+    base = max(0.18, round(1.0 / len(clean_causes), 3))
+    out = [{"cause": c, "weight": round(base + signal_bonus, 3)} for c in clean_causes]
+    out.sort(key=lambda x: x["weight"], reverse=True)
+    return out
+
+
+def _count_text_hints(
+    rule_name: str,
+    category: str,
+    likely_causes: list[str],
     symptom_text: str,
-    learned_weights: dict[str, float],
-) -> list[TriageHit]:
-    hits: list[TriageHit] = []
+) -> int:
+    text = symptom_text.lower()
+    bucket = {
+        rule_name.lower(),
+        category.lower(),
+        *[c.lower() for c in likely_causes if c],
+    }
 
-    for r in _FALLBACK_RULES:
-        matched: list[str] = []
+    hints = set()
 
-        # Symptom keyword match
-        kw = r.get("keywords") or []
-        if any(k.lower() in symptom_text for k in kw):
-            matched.append("symptoms")
+    for item in bucket:
+        for token in item.replace("/", " ").replace("-", " ").split():
+            token = token.strip(" ,()")
+            if len(token) >= 4:
+                hints.add(token)
 
-        # DTC prefix match
-        prefixes = r.get("dtc_prefixes") or []
-        if prefixes:
-            for d in dtc_set:
-                if any(d.startswith(p) for p in prefixes):
-                    matched.append("dtc")
-                    break
+    matched = 0
+    for hint in hints:
+        if hint in text:
+            matched += 1
 
-        if not matched:
-            continue
+    # manual synonym catchers for common shop phrasing
+    manual_groups = [
+        ({"stall", "stalls", "stalling", "dies"}, text),
+        ({"vibration", "vibrate", "shake", "shudder"}, text),
+        ({"hesitation", "bog", "flat"}, text),
+        ({"clunk", "knock"}, text),
+        ({"rough", "idle"}, text),
+        ({"pull", "pulling", "braking"}, text),
+    ]
 
-        base = float(r.get("base_weight") or 1.0)
-        learned_mult = float(learned_weights.get(str(r["rule_id"]), 1.0))
-        score = round(base * learned_mult + (0.2 if "dtc" in matched else 0.0), 4)
+    for words, body in manual_groups:
+        if any(w in body for w in words):
+            if any(w in " ".join(bucket) for w in words):
+                matched += 1
 
-        hits.append(
-            TriageHit(
-                rule_id=str(r["rule_id"]),
-                name=str(r["name"]),
-                score=score,
-                likely_causes=list(r.get("likely_causes") or []),
-                checks=list(r.get("checks") or []),
-                matched=matched,
-            )
-        )
-
-    hits.sort(key=lambda h: h.score, reverse=True)
-    return hits[:10]
+    return matched
 
 
-# ----------------------------
-# Helpers
-# ----------------------------
-
-def _norm(x: Any) -> str:
-    return str(x).strip()
+def _clamp_score(value: float) -> float:
+    return round(max(0.05, min(0.98, value)), 3)
 
 
-def _infer_tags(symptom_text: str) -> set[str]:
-    t = symptom_text.lower()
-    tags: set[str] = set()
-    if any(w in t for w in ["noise", "whine", "hum", "growl", "squeal", "rattle", "clunk", "knock"]):
-        tags.add("noise")
-    if any(w in t for w in ["vibration", "vibrate", "shake", "shudder"]):
-        tags.add("vibration")
-    if any(w in t for w in ["rough idle", "misfire", "stumble", "hesitation"]):
-        tags.add("misfire")
-    if any(w in t for w in ["overheat", "temperature high", "temp high", "hot"]):
-        tags.add("overheat")
-    if any(w in t for w in ["no start", "won't start", "wont start", "cranks but"]):
-        tags.add("no_start")
-    if any(w in t for w in ["stall", "stalls", "dies at stop", "dies"]):
-        tags.add("stall")
-    return tags
+def _merge_unique(a: Iterable[str], b: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+
+    for x in list(a or []) + list(b or []):
+        x2 = (x or "").strip()
+        if x2 and x2 not in seen:
+            seen.add(x2)
+            out.append(x2)
+
+    return out
