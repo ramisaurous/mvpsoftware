@@ -4,9 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from sqlmodel import Session, select
-
-from app.core.db import engine
+from sqlmodel import select
+from app.core.db import get_session
 from app.core.symptom_parser import ParsedSymptoms, parse_symptoms
 from app.models.triage_rule import TriageRule
 
