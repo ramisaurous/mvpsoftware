@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
