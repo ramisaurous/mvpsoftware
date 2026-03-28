@@ -76,6 +76,14 @@
       margin-right: 6px;
       margin-top: 6px;
     }
+    ul {
+      margin-top: 8px;
+      padding-left: 18px;
+    }
+    .error {
+      color: #fca5a5;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -145,6 +153,15 @@
       }
     }
 
+    function setRaw(data) {
+      $("rawResponse").textContent = JSON.stringify(data, null, 2);
+    }
+
+    function showError(message, data = null) {
+      $("triageResults").innerHTML = `<p class="error">${message}</p>`;
+      if (data) setRaw(data);
+    }
+
     function renderTriage(data) {
       const hits = data?.triage?.hits || [];
       const container = $("triageResults");
@@ -168,89 +185,115 @@
 
           <div style="margin-top:10px;"><strong>Suggested checks</strong></div>
           <ul>
-            ${(hit.suggested_checks || []).map(x => `<li>${x}</li>`).join("")}
+            ${(hit.suggested_checks || []).map(x => `<li>${x}</li>`).join("") || "<li>No checks returned</li>"}
           </ul>
         </div>
       `).join("");
     }
 
-    function setRaw(data) {
-      $("rawResponse").textContent = JSON.stringify(data, null, 2);
-    }
-
     async function loadCases() {
-      const vin = $("vinFilter").value.trim().toUpperCase();
-      let url = "/cases?limit=25";
-      if (vin) url += `&vin=${encodeURIComponent(vin)}`;
+      try {
+        const vin = $("vinFilter").value.trim().toUpperCase();
+        let url = "/api/cases?limit=25";
+        if (vin) url += `&vin=${encodeURIComponent(vin)}`;
 
-      const res = await fetch(url);
-      const data = await res.json();
-      const rows = data.cases || [];
-      const list = $("caseList");
+        const res = await fetch(url);
+        const data = await res.json();
+        const rows = data.cases || [];
+        const list = $("caseList");
 
-      if (!rows.length) {
-        list.innerHTML = "<p class='muted'>No cases found.</p>";
-        return;
+        if (!rows.length) {
+          list.innerHTML = "<p class='muted'>No cases found.</p>";
+          return;
+        }
+
+        list.innerHTML = rows.map(c => `
+          <div class="case-item" onclick="selectCase(${c.id})">
+            <strong>Case #${c.id}</strong>
+            <div class="muted">${fmtDate(c.created_at)}</div>
+            <div><strong>VIN:</strong> ${c.vin || ""}</div>
+            <div><strong>Engine:</strong> ${c.engine || "-"}</div>
+            <div><strong>Mileage:</strong> ${c.mileage ?? "-"}</div>
+            <div><strong>DTCs:</strong> ${(c.dtcs || []).join(", ") || "-"}</div>
+            <div><strong>Symptoms:</strong> ${(c.symptoms || []).join(", ") || "-"}</div>
+          </div>
+        `).join("");
+      } catch (err) {
+        $("caseList").innerHTML = `<p class="error">Failed to load cases.</p>`;
       }
-
-      list.innerHTML = rows.map(c => `
-        <div class="case-item" onclick="selectCase(${c.id})">
-          <strong>Case #${c.id}</strong>
-          <div class="muted">${fmtDate(c.created_at)}</div>
-          <div><strong>VIN:</strong> ${c.vin || ""}</div>
-          <div><strong>Engine:</strong> ${c.engine || "-"}</div>
-          <div><strong>Mileage:</strong> ${c.mileage ?? "-"}</div>
-          <div><strong>DTCs:</strong> ${(c.dtcs || []).join(", ") || "-"}</div>
-          <div><strong>Symptoms:</strong> ${(c.symptoms || []).join(", ") || "-"}</div>
-        </div>
-      `).join("");
     }
 
     async function selectCase(id) {
-      $("caseId").value = id;
-      const res = await fetch(`/cases/${id}`);
-      const data = await res.json();
-      setRaw(data);
+      try {
+        $("caseId").value = id;
+        const res = await fetch(`/api/cases/${id}`);
+        const data = await res.json();
+        setRaw(data);
+      } catch (err) {
+        showError("Failed to load selected case.");
+      }
     }
 
     window.selectCase = selectCase;
 
     $("createBtn").addEventListener("click", async () => {
-      const payload = {
-        vin: $("vin").value.trim(),
-        engine: $("engine").value.trim() || null,
-        mileage: $("mileage").value ? Number($("mileage").value) : null,
-        dtcs: splitCSV($("dtcs").value),
-        symptoms: splitCSV($("symptoms").value),
-        notes: $("notes").value.trim() || null
-      };
+      try {
+        const payload = {
+          vin: $("vin").value.trim(),
+          engine: $("engine").value.trim() || null,
+          mileage: $("mileage").value ? Number($("mileage").value) : null,
+          dtcs: splitCSV($("dtcs").value),
+          symptoms: splitCSV($("symptoms").value),
+          notes: $("notes").value.trim() || null
+        };
 
-      const res = await fetch("/cases", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+        const res = await fetch("/api/cases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-      const data = await res.json();
-      setRaw(data);
+        const data = await res.json();
+        setRaw(data);
 
-      if (data?.case?.id) {
-        $("caseId").value = data.case.id;
+        if (!res.ok) {
+          showError("Create failed.", data);
+          return;
+        }
+
+        if (data?.case?.id) {
+          $("caseId").value = data.case.id;
+        }
+
+        renderTriage(data);
+        await loadCases();
+      } catch (err) {
+        showError("Create failed. Check console or backend logs.");
       }
-
-      renderTriage(data);
-      await loadCases();
     });
 
     $("triageBtn").addEventListener("click", async () => {
-      const caseId = $("caseId").value.trim();
-      if (!caseId) return;
+      try {
+        const caseId = $("caseId").value.trim();
+        if (!caseId) {
+          showError("Enter or select a Case ID first.");
+          return;
+        }
 
-      const res = await fetch(`/cases/${caseId}/triage`, { method: "POST" });
-      const data = await res.json();
-      setRaw(data);
-      renderTriage(data);
-      await loadCases();
+        const res = await fetch(`/api/cases/${caseId}/triage`, { method: "POST" });
+        const data = await res.json();
+        setRaw(data);
+
+        if (!res.ok) {
+          showError("Triage failed.", data);
+          return;
+        }
+
+        renderTriage(data);
+        await loadCases();
+      } catch (err) {
+        showError("Triage failed. Check console or backend logs.");
+      }
     });
 
     $("refreshCasesBtn").addEventListener("click", loadCases);
