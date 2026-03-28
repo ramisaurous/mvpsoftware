@@ -1,140 +1,135 @@
-<!-- app/templates/index.html -->
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GM Full-Size SUV AI Shop System</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+      h1 { margin: 0 0 8px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
+      label { display: block; font-size: 12px; margin: 10px 0 6px; opacity: 0.85; }
+      input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font: inherit; }
+      textarea { min-height: 92px; resize: vertical; }
+      button { padding: 10px 14px; border: 1px solid #111; border-radius: 10px; background: #111; color: #fff; cursor: pointer; }
+      button.secondary { background: #fff; color: #111; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #fafafa; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
+      .row { display: flex; gap: 10px; align-items: end; }
+      .row > * { flex: 1; }
+      .muted { opacity: 0.75; font-size: 13px; }
+    </style>
   </head>
   <body>
-    <div class="wrap">
-      <header>
-        <h1>GM Full-Size SUV AI Shop System</h1>
-        <p>VIN intake → scan import → DTC/symptoms → triage → approval-gated actions → case history</p>
-      </header>
+    <h1>GM Full-Size SUV AI Shop System</h1>
+    <div class="muted">VIN intake → DTC/symptoms → triage suggestions</div>
 
-      <section class="card">
-        <h2>Create Case</h2>
+    <div class="grid" style="margin-top: 16px;">
+      <div class="card">
+        <h2 style="margin-top:0;">Create Case</h2>
+
+        <label for="vin">VIN</label>
+        <input id="vin" placeholder="17-char VIN" />
+
         <div class="row">
-          <input id="vin" placeholder="VIN (17 chars)" />
-          <input id="engine" placeholder="Engine (L84 / L87)" />
-          <input id="mileage" placeholder="Mileage" />
+          <div>
+            <label for="engine">Engine (optional)</label>
+            <input id="engine" placeholder="L84 / L87" />
+          </div>
+          <div>
+            <label for="mileage">Mileage (optional)</label>
+            <input id="mileage" placeholder="e.g. 65000" inputmode="numeric" />
+          </div>
         </div>
-        <div class="row">
-          <input id="dtcs" placeholder="DTCs (comma-separated: P0300,U0100,...)" />
-        </div>
-        <div class="row">
-          <input id="symptoms" placeholder="Symptoms (comma-separated: rough idle, no start,...)" />
-        </div>
-        <div class="row">
+
+        <label for="dtcs">DTCs (comma-separated)</label>
+        <input id="dtcs" placeholder="P0300, P0171" />
+
+        <label for="symptoms">Symptoms (comma-separated)</label>
+        <input id="symptoms" placeholder="rough idle, stalls at stop, vibration over 60mph" />
+
+        <label for="notes">Notes (optional)</label>
+        <textarea id="notes" placeholder="Any extra context..."></textarea>
+
+        <div class="row" style="margin-top: 10px;">
           <button onclick="createCase()">Create</button>
+          <button class="secondary" onclick="runTriage()">Run Triage (by Case ID)</button>
         </div>
-        <pre id="createOut"></pre>
-      </section>
 
-      <section class="card">
-        <h2>Run Triage</h2>
-        <div class="row">
-          <input id="caseId" placeholder="Case ID" />
-          <button onclick="runTriage()">Run</button>
-        </div>
-        <pre id="triageOut"></pre>
-      </section>
+        <label for="caseId" style="margin-top: 12px;">Case ID (auto-filled after Create)</label>
+        <input id="caseId" placeholder="e.g. 123" inputmode="numeric" />
+      </div>
 
-      <section class="card">
-        <h2>Scan Import</h2>
-        <div class="row">
-          <input id="scanCaseId" placeholder="Case ID" />
-          <input id="scanFile" type="file" />
-          <button onclick="uploadScan()">Upload Scan</button>
-        </div>
-        <pre id="scanOut"></pre>
-      </section>
+      <div class="card">
+        <h2 style="margin-top:0;">Possible issues & suggested checks</h2>
+        <pre id="triageOut">Create a case to see triage results.</pre>
 
-      <section class="card">
-        <h2>Approval-Gated Service Actions</h2>
-        <div class="row">
-          <input id="actionCaseId" placeholder="Case ID" />
-          <input id="actionType" placeholder="Type (programming/diagnostic/...)" />
-        </div>
-        <div class="row">
-          <input id="actionTitle" placeholder="Title" />
-          <button onclick="createAction()">Create</button>
-        </div>
-        <div class="row">
-          <input id="actionId" placeholder="Action ID" />
-          <button onclick="submitAction()">Submit</button>
-          <input id="approver" placeholder="Approved by" />
-          <button onclick="approveAction()">Approve</button>
-          <button onclick="completeAction()">Complete</button>
-        </div>
-        <pre id="actionOut"></pre>
-      </section>
-
-      <footer>
-        <small>API docs: <a href="/docs">/docs</a></small>
-      </footer>
+        <h3>Raw response</h3>
+        <pre id="createOut">{}</pre>
+      </div>
     </div>
 
     <script>
       const j = (x) => JSON.stringify(x, null, 2);
 
+      function renderHits(hits) {
+        if (!Array.isArray(hits) || hits.length === 0) return "No triage hits.";
+        return hits.slice(0, 10).map((h, i) => {
+          const title = h?.name ?? h?.rule_name ?? h?.rule_id ?? "Unknown";
+          const score = (h?.score ?? h?.weight ?? "");
+          const causes = Array.isArray(h?.likely_causes) ? h.likely_causes.join(", ") : "";
+          const checks = Array.isArray(h?.checks) ? h.checks.map(c => `- ${c}`).join("\n") : "";
+          return `${i + 1}. ${title}${score !== "" ? ` (score: ${score})` : ""}\nCauses: ${causes}\nChecks:\n${checks}`;
+        }).join("\n\n");
+      }
+
+      function extractHits(data) {
+        return (
+          data?.triage?.hits ??
+          data?.case?.triage_snapshot?.hits ??
+          []
+        );
+      }
+
       async function createCase() {
         const payload = {
           vin: document.getElementById("vin").value,
           engine: document.getElementById("engine").value || null,
-          mileage: parseInt(document.getElementById("mileage").value || "") || null,
+          mileage: parseInt(document.getElementById("mileage").value || "", 10) || null,
           dtcs: (document.getElementById("dtcs").value || "").split(",").map(s => s.trim()).filter(Boolean),
           symptoms: (document.getElementById("symptoms").value || "").split(",").map(s => s.trim()).filter(Boolean),
+          notes: document.getElementById("notes").value || null,
         };
-        const res = await fetch("/api/cases", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
-        document.getElementById("createOut").textContent = j(await res.json());
+
+        const res = await fetch("/api/cases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        document.getElementById("createOut").textContent = j(data);
+
+        const caseId = data?.case?.id;
+        if (caseId != null) document.getElementById("caseId").value = String(caseId);
+
+        const hits = extractHits(data);
+        document.getElementById("triageOut").textContent = renderHits(hits);
       }
 
       async function runTriage() {
-        const id = document.getElementById("caseId").value;
-        const res = await fetch(`/api/cases/${id}/triage`, { method:"POST" });
-        document.getElementById("triageOut").textContent = j(await res.json());
-      }
+        const caseId = document.getElementById("caseId").value.trim();
+        if (!caseId) {
+          document.getElementById("triageOut").textContent = "Enter a Case ID first.";
+          return;
+        }
 
-      async function uploadScan() {
-        const id = document.getElementById("scanCaseId").value;
-        const f = document.getElementById("scanFile").files[0];
-        const fd = new FormData();
-        fd.append("scan_file", f);
-        const res = await fetch(`/api/cases/${id}/scan-import`, { method:"POST", body: fd });
-        document.getElementById("scanOut").textContent = j(await res.json());
-      }
+        const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/triage`, { method: "POST" });
+        const data = await res.json();
 
-      async function createAction() {
-        const id = document.getElementById("actionCaseId").value;
-        const payload = {
-          action_type: document.getElementById("actionType").value,
-          title: document.getElementById("actionTitle").value,
-          details: {}
-        };
-        const res = await fetch(`/api/cases/${id}/actions`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
-        document.getElementById("actionOut").textContent = j(await res.json());
-      }
-
-      async function submitAction() {
-        const id = document.getElementById("actionId").value;
-        const res = await fetch(`/api/actions/${id}/submit`, { method:"POST" });
-        document.getElementById("actionOut").textContent = j(await res.json());
-      }
-
-      async function approveAction() {
-        const id = document.getElementById("actionId").value;
-        const payload = { approved_by: document.getElementById("approver").value || "tech" };
-        const res = await fetch(`/api/actions/${id}/approve`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
-        document.getElementById("actionOut").textContent = j(await res.json());
-      }
-
-      async function completeAction() {
-        const id = document.getElementById("actionId").value;
-        const res = await fetch(`/api/actions/${id}/complete`, { method:"POST" });
-        document.getElementById("actionOut").textContent = j(await res.json());
+        document.getElementById("createOut").textContent = j(data);
+        const hits = extractHits(data);
+        document.getElementById("triageOut").textContent = renderHits(hits);
       }
     </script>
   </body>
