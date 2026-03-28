@@ -6,12 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field as PField
-
 from sqlmodel import select
 
 from app.core.db import get_session
-from app.core.vin import decode_vin
 from app.core.triage import triage
+from app.core.vin import decode_vin
 from app.models.case import RepairCase
 
 router = APIRouter(tags=["cases"])
@@ -41,7 +40,10 @@ def create_case(payload: CaseCreateIn) -> dict[str, Any]:
     vin_info = decode_vin(payload.vin)
 
     if vin_info.year is None and "VIN must be 17 chars" in vin_info.notes:
-        raise HTTPException(status_code=400, detail={"error": "invalid_vin", "notes": vin_info.notes})
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_vin", "notes": vin_info.notes},
+        )
 
     with get_session() as session:
         case = RepairCase(
@@ -60,16 +62,22 @@ def create_case(payload: CaseCreateIn) -> dict[str, Any]:
         session.commit()
         session.refresh(case)
 
-        # initial triage snapshot
         learned = _load_learning_weights(session)
-        hits = triage(case.dtcs, case.symptoms, case.platform, case.engine, learned_weights=learned)
+        hits = triage(
+            case.dtcs,
+            case.symptoms,
+            case.platform,
+            case.engine,
+            learned_weights=learned,
+        )
         case.triage_snapshot = {"hits": [h.__dict__ for h in hits]}
         case.updated_at = datetime.utcnow()
         session.add(case)
         session.commit()
         session.refresh(case)
 
-        return {"case": case.model_dump()}
+        # Key fix: return triage so the UI can show issue/solutions immediately after Create.
+        return {"case": case.model_dump(), "triage": case.triage_snapshot}
 
 
 @router.get("/cases/{case_id}")
@@ -138,7 +146,6 @@ def update_case(case_id: int, payload: CaseUpdateIn) -> dict[str, Any]:
         session.commit()
         session.refresh(case)
 
-        # Update “learning” when outcome + confirmed cause are set
         if case.outcome and case.confirmed_cause:
             _apply_learning(session, case)
             session.commit()
@@ -165,11 +172,9 @@ def _load_learning_weights(session) -> dict[str, float]:
             if not rid:
                 continue
             totals[rid] = totals.get(rid, 0) + 1
-            # if confirmed cause text is non-empty, count as “win” for top 2 hits only
-            # to avoid boosting every matched rule
+            # Kept as-is: you intentionally only count wins on top2 below.
             pass
 
-        # Boost only top 2 rules when fixed
         top2 = [h.get("rule_id") for h in hits[:2] if isinstance(h, dict) and h.get("rule_id")]
         for rid in top2:
             wins[rid] = wins.get(rid, 0) + 1
@@ -177,7 +182,6 @@ def _load_learning_weights(session) -> dict[str, float]:
     weights: dict[str, float] = {}
     for rid, t in totals.items():
         w = wins.get(rid, 0)
-        # Laplace-smoothed win-rate -> multiplier in ~[0.85, 1.25]
         rate = (w + 1) / (t + 2)
         mult = 0.85 + 0.4 * rate
         weights[rid] = round(mult, 4)
@@ -192,5 +196,4 @@ def _apply_learning(session, case: RepairCase) -> None:
     _ = session
     if not case.triage_snapshot:
         return
-    # Nothing to store; dynamic computation reads case history.
     return
