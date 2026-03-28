@@ -1,0 +1,141 @@
+<!-- app/templates/index.html -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>GM Full-Size SUV AI Shop System</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>GM Full-Size SUV AI Shop System</h1>
+        <p>VIN intake → scan import → DTC/symptoms → triage → approval-gated actions → case history</p>
+      </header>
+
+      <section class="card">
+        <h2>Create Case</h2>
+        <div class="row">
+          <input id="vin" placeholder="VIN (17 chars)" />
+          <input id="engine" placeholder="Engine (L84 / L87)" />
+          <input id="mileage" placeholder="Mileage" />
+        </div>
+        <div class="row">
+          <input id="dtcs" placeholder="DTCs (comma-separated: P0300,U0100,...)" />
+        </div>
+        <div class="row">
+          <input id="symptoms" placeholder="Symptoms (comma-separated: rough idle, no start,...)" />
+        </div>
+        <div class="row">
+          <button onclick="createCase()">Create</button>
+        </div>
+        <pre id="createOut"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Run Triage</h2>
+        <div class="row">
+          <input id="caseId" placeholder="Case ID" />
+          <button onclick="runTriage()">Run</button>
+        </div>
+        <pre id="triageOut"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Scan Import</h2>
+        <div class="row">
+          <input id="scanCaseId" placeholder="Case ID" />
+          <input id="scanFile" type="file" />
+          <button onclick="uploadScan()">Upload Scan</button>
+        </div>
+        <pre id="scanOut"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Approval-Gated Service Actions</h2>
+        <div class="row">
+          <input id="actionCaseId" placeholder="Case ID" />
+          <input id="actionType" placeholder="Type (programming/diagnostic/...)" />
+        </div>
+        <div class="row">
+          <input id="actionTitle" placeholder="Title" />
+          <button onclick="createAction()">Create</button>
+        </div>
+        <div class="row">
+          <input id="actionId" placeholder="Action ID" />
+          <button onclick="submitAction()">Submit</button>
+          <input id="approver" placeholder="Approved by" />
+          <button onclick="approveAction()">Approve</button>
+          <button onclick="completeAction()">Complete</button>
+        </div>
+        <pre id="actionOut"></pre>
+      </section>
+
+      <footer>
+        <small>API docs: <a href="/docs">/docs</a></small>
+      </footer>
+    </div>
+
+    <script>
+      const j = (x) => JSON.stringify(x, null, 2);
+
+      async function createCase() {
+        const payload = {
+          vin: document.getElementById("vin").value,
+          engine: document.getElementById("engine").value || null,
+          mileage: parseInt(document.getElementById("mileage").value || "") || null,
+          dtcs: (document.getElementById("dtcs").value || "").split(",").map(s => s.trim()).filter(Boolean),
+          symptoms: (document.getElementById("symptoms").value || "").split(",").map(s => s.trim()).filter(Boolean),
+        };
+        const res = await fetch("/api/cases", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+        document.getElementById("createOut").textContent = j(await res.json());
+      }
+
+      async function runTriage() {
+        const id = document.getElementById("caseId").value;
+        const res = await fetch(`/api/cases/${id}/triage`, { method:"POST" });
+        document.getElementById("triageOut").textContent = j(await res.json());
+      }
+
+      async function uploadScan() {
+        const id = document.getElementById("scanCaseId").value;
+        const f = document.getElementById("scanFile").files[0];
+        const fd = new FormData();
+        fd.append("scan_file", f);
+        const res = await fetch(`/api/cases/${id}/scan-import`, { method:"POST", body: fd });
+        document.getElementById("scanOut").textContent = j(await res.json());
+      }
+
+      async function createAction() {
+        const id = document.getElementById("actionCaseId").value;
+        const payload = {
+          action_type: document.getElementById("actionType").value,
+          title: document.getElementById("actionTitle").value,
+          details: {}
+        };
+        const res = await fetch(`/api/cases/${id}/actions`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+        document.getElementById("actionOut").textContent = j(await res.json());
+      }
+
+      async function submitAction() {
+        const id = document.getElementById("actionId").value;
+        const res = await fetch(`/api/actions/${id}/submit`, { method:"POST" });
+        document.getElementById("actionOut").textContent = j(await res.json());
+      }
+
+      async function approveAction() {
+        const id = document.getElementById("actionId").value;
+        const payload = { approved_by: document.getElementById("approver").value || "tech" };
+        const res = await fetch(`/api/actions/${id}/approve`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
+        document.getElementById("actionOut").textContent = j(await res.json());
+      }
+
+      async function completeAction() {
+        const id = document.getElementById("actionId").value;
+        const res = await fetch(`/api/actions/${id}/complete`, { method:"POST" });
+        document.getElementById("actionOut").textContent = j(await res.json());
+      }
+    </script>
+  </body>
+</html>
