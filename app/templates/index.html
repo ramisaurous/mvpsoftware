@@ -1,193 +1,261 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>GM Full-Size SUV AI Shop System</title>
-    <style>
-      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
-      h1 { margin: 0 0 8px; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-      .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; }
-      label { display: block; font-size: 12px; margin: 10px 0 6px; opacity: 0.85; }
-      input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font: inherit; }
-      textarea { min-height: 92px; resize: vertical; }
-      button { padding: 10px 14px; border: 1px solid #111; border-radius: 10px; background: #111; color: #fff; cursor: pointer; }
-      button.secondary { background: #fff; color: #111; }
-      pre { white-space: pre-wrap; word-break: break-word; background: #fafafa; border: 1px solid #eee; border-radius: 10px; padding: 12px; }
-      .row { display: flex; gap: 10px; align-items: end; }
-      .row > * { flex: 1; }
-      .muted { opacity: 0.75; font-size: 13px; }
-    </style>
-  </head>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GM Full-Size SUV AI Shop System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 24px;
+      background: #0f172a;
+      color: #e5e7eb;
+    }
+    h1, h2, h3 { margin-bottom: 10px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 24px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+    }
+    input, textarea, button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      margin-top: 8px;
+      margin-bottom: 12px;
+      border-radius: 10px;
+      border: 1px solid #4b5563;
+      background: #1f2937;
+      color: #fff;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    button {
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .case-item {
+      border: 1px solid #374151;
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 10px;
+      background: #0b1220;
+      cursor: pointer;
+    }
+    .case-item:hover {
+      border-color: #60a5fa;
+      background: #111827;
+    }
+    .muted { color: #9ca3af; font-size: 14px; }
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #1e3a8a;
+      font-size: 12px;
+      margin-right: 6px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>GM Full-Size SUV AI Shop System</h1>
+  <p class="muted">VIN intake → DTC/symptoms → triage suggestions → case lookup</p>
 
-  <body>
-    <h1>GM Full-Size SUV AI Shop System</h1>
-    <div class="muted">VIN intake → DTC/symptoms → triage suggestions</div>
-
-    <div class="grid" style="margin-top: 16px;">
+  <div class="grid">
+    <div>
       <div class="card">
-        <h2 style="margin-top:0;">Create Case</h2>
+        <h2>Create Case</h2>
 
-        <label for="vin">VIN</label>
-        <input id="vin" placeholder="17-char VIN" />
-
+        <input id="vin" placeholder="VIN" />
         <div class="row">
-          <div>
-            <label for="engine">Engine (optional)</label>
-            <input id="engine" placeholder="L84 / L87" />
-          </div>
-          <div>
-            <label for="mileage">Mileage (optional)</label>
-            <input id="mileage" placeholder="e.g. 65000" inputmode="numeric" />
-          </div>
+          <input id="engine" placeholder="Engine (optional)" />
+          <input id="mileage" type="number" placeholder="Mileage (optional)" />
         </div>
+        <input id="dtcs" placeholder="DTCs (comma-separated)" />
+        <input id="symptoms" placeholder="Symptoms (comma-separated)" />
+        <textarea id="notes" placeholder="Notes (optional)"></textarea>
 
-        <label for="dtcs">DTCs (comma-separated)</label>
-        <input id="dtcs" placeholder="P0300, P0171" />
-
-        <label for="symptoms">Symptoms (comma-separated)</label>
-        <input id="symptoms" placeholder="rough idle, stalls at stop, vibration over 60mph" />
-
-        <label for="notes">Notes (optional)</label>
-        <textarea id="notes" placeholder="Any extra context..."></textarea>
-
-        <div class="row" style="margin-top: 10px;">
-          <!-- IMPORTANT: type="button" prevents accidental form submit/reload -->
-          <button type="button" onclick="createCase()">Create</button>
-          <button type="button" class="secondary" onclick="runTriage()">Run Triage (by Case ID)</button>
-        </div>
-
-        <label for="caseId" style="margin-top: 12px;">Case ID (auto-filled after Create)</label>
-        <input id="caseId" placeholder="e.g. 123" inputmode="numeric" />
+        <button id="createBtn">Create Case</button>
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0;">Possible issues & suggested checks</h2>
-        <pre id="triageOut">Create a case to see triage results.</pre>
+        <h2>Run Triage</h2>
+        <input id="caseId" placeholder="Case ID" />
+        <button id="triageBtn">Run Triage by Case ID</button>
+      </div>
 
+      <div class="card">
+        <h2>Possible issues & suggested checks</h2>
+        <div id="triageResults">Create or select a case to see triage results.</div>
+      </div>
+
+      <div class="card">
         <h3>Raw response</h3>
-        <pre id="createOut">{}</pre>
+        <pre id="rawResponse">{}</pre>
       </div>
     </div>
 
-    <script>
-      const j = (x) => JSON.stringify(x, null, 2);
+    <div>
+      <div class="card">
+        <h2>Recent Cases</h2>
+        <input id="vinFilter" placeholder="Filter by VIN (optional)" />
+        <button id="refreshCasesBtn">Refresh Cases</button>
+        <div id="caseList" class="muted">Loading cases...</div>
+      </div>
+    </div>
+  </div>
 
-      function renderHits(hits) {
-        if (!Array.isArray(hits) || hits.length === 0) return "No triage hits.";
-        return hits.slice(0, 10).map((h, i) => {
-          const title = h?.name ?? h?.rule_name ?? h?.rule_id ?? "Unknown";
-          const score = (h?.score ?? h?.weight ?? "");
-          const causes = Array.isArray(h?.likely_causes) ? h.likely_causes.join(", ") : "";
-          const checks = Array.isArray(h?.checks) ? h.checks.map(c => `- ${c}`).join("\n") : "";
-          return `${i + 1}. ${title}${score !== "" ? ` (score: ${score})` : ""}\nCauses: ${causes}\nChecks:\n${checks}`;
-        }).join("\n\n");
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function splitCSV(value) {
+      return value
+        .split(",")
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    function fmtDate(value) {
+      if (!value) return "";
+      try {
+        return new Date(value).toLocaleString();
+      } catch {
+        return value;
+      }
+    }
+
+    function renderTriage(data) {
+      const hits = data?.triage?.hits || [];
+      const container = $("triageResults");
+
+      if (!hits.length) {
+        container.innerHTML = "<p class='muted'>No triage hits returned.</p>";
+        return;
       }
 
-      function extractHits(data) {
-        return (data?.triage?.hits ?? data?.case?.triage_snapshot?.hits ?? []);
+      container.innerHTML = hits.map((hit, i) => `
+        <div class="case-item" style="cursor:default;">
+          <strong>#${i + 1} ${hit.name || "Unnamed Rule"}</strong>
+          <div class="muted">Category: ${hit.category || "n/a"} | Score: ${hit.score ?? "n/a"}</div>
+
+          <div style="margin-top:10px;"><strong>Likely causes</strong></div>
+          <div>
+            ${(hit.probable_causes || []).map(c => `
+              <span class="pill">${c.cause} (${c.weight})</span>
+            `).join("") || "<span class='muted'>None</span>"}
+          </div>
+
+          <div style="margin-top:10px;"><strong>Suggested checks</strong></div>
+          <ul>
+            ${(hit.suggested_checks || []).map(x => `<li>${x}</li>`).join("")}
+          </ul>
+        </div>
+      `).join("");
+    }
+
+    function setRaw(data) {
+      $("rawResponse").textContent = JSON.stringify(data, null, 2);
+    }
+
+    async function loadCases() {
+      const vin = $("vinFilter").value.trim().toUpperCase();
+      let url = "/cases?limit=25";
+      if (vin) url += `&vin=${encodeURIComponent(vin)}`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      const rows = data.cases || [];
+      const list = $("caseList");
+
+      if (!rows.length) {
+        list.innerHTML = "<p class='muted'>No cases found.</p>";
+        return;
       }
 
-      async function safeReadJson(res) {
-        const text = await res.text(); // always works
-        try {
-          return { ok: true, data: JSON.parse(text), raw: text };
-        } catch {
-          return { ok: false, data: null, raw: text };
-        }
+      list.innerHTML = rows.map(c => `
+        <div class="case-item" onclick="selectCase(${c.id})">
+          <strong>Case #${c.id}</strong>
+          <div class="muted">${fmtDate(c.created_at)}</div>
+          <div><strong>VIN:</strong> ${c.vin || ""}</div>
+          <div><strong>Engine:</strong> ${c.engine || "-"}</div>
+          <div><strong>Mileage:</strong> ${c.mileage ?? "-"}</div>
+          <div><strong>DTCs:</strong> ${(c.dtcs || []).join(", ") || "-"}</div>
+          <div><strong>Symptoms:</strong> ${(c.symptoms || []).join(", ") || "-"}</div>
+        </div>
+      `).join("");
+    }
+
+    async function selectCase(id) {
+      $("caseId").value = id;
+      const res = await fetch(`/cases/${id}`);
+      const data = await res.json();
+      setRaw(data);
+    }
+
+    window.selectCase = selectCase;
+
+    $("createBtn").addEventListener("click", async () => {
+      const payload = {
+        vin: $("vin").value.trim(),
+        engine: $("engine").value.trim() || null,
+        mileage: $("mileage").value ? Number($("mileage").value) : null,
+        dtcs: splitCSV($("dtcs").value),
+        symptoms: splitCSV($("symptoms").value),
+        notes: $("notes").value.trim() || null
+      };
+
+      const res = await fetch("/cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      setRaw(data);
+
+      if (data?.case?.id) {
+        $("caseId").value = data.case.id;
       }
 
-      async function createCase() {
-        document.getElementById("triageOut").textContent = "Creating case...";
-        document.getElementById("createOut").textContent = "{}";
+      renderTriage(data);
+      await loadCases();
+    });
 
-        const payload = {
-          vin: document.getElementById("vin").value,
-          engine: document.getElementById("engine").value || null,
-          mileage: parseInt(document.getElementById("mileage").value || "", 10) || null,
-          dtcs: (document.getElementById("dtcs").value || "").split(",").map(s => s.trim()).filter(Boolean),
-          symptoms: (document.getElementById("symptoms").value || "").split(",").map(s => s.trim()).filter(Boolean),
-          notes: document.getElementById("notes").value || null,
-        };
+    $("triageBtn").addEventListener("click", async () => {
+      const caseId = $("caseId").value.trim();
+      if (!caseId) return;
 
-        try {
-          const res = await fetch("/api/cases", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+      const res = await fetch(`/cases/${caseId}/triage`, { method: "POST" });
+      const data = await res.json();
+      setRaw(data);
+      renderTriage(data);
+      await loadCases();
+    });
 
-          const parsed = await safeReadJson(res);
+    $("refreshCasesBtn").addEventListener("click", loadCases);
 
-          document.getElementById("createOut").textContent =
-            `HTTP ${res.status} ${res.statusText}\n\n` +
-            (parsed.ok ? j(parsed.data) : parsed.raw);
-
-          if (!res.ok) {
-            document.getElementById("triageOut").textContent =
-              `Create failed (HTTP ${res.status}). See Raw response.`;
-            return;
-          }
-
-          if (!parsed.ok || !parsed.data) {
-            document.getElementById("triageOut").textContent =
-              `Create succeeded but response was not JSON (HTTP ${res.status}). See Raw response.`;
-            return;
-          }
-
-          const data = parsed.data;
-
-          const caseId = data?.case?.id;
-          if (caseId != null) document.getElementById("caseId").value = String(caseId);
-
-          const hits = extractHits(data);
-          document.getElementById("triageOut").textContent = renderHits(hits);
-        } catch (e) {
-          document.getElementById("triageOut").textContent =
-            "Fetch failed (true network error).";
-          document.getElementById("createOut").textContent = String(e);
-        }
-      }
-
-      async function runTriage() {
-        const caseId = document.getElementById("caseId").value.trim();
-        if (!caseId) {
-          document.getElementById("triageOut").textContent = "Enter a Case ID first.";
-          return;
-        }
-
-        document.getElementById("triageOut").textContent = "Running triage...";
-
-        try {
-          const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/triage`, { method: "POST" });
-          const parsed = await safeReadJson(res);
-
-          document.getElementById("createOut").textContent =
-            `HTTP ${res.status} ${res.statusText}\n\n` +
-            (parsed.ok ? j(parsed.data) : parsed.raw);
-
-          if (!res.ok) {
-            document.getElementById("triageOut").textContent =
-              `Triage failed (HTTP ${res.status}). See Raw response.`;
-            return;
-          }
-
-          if (!parsed.ok || !parsed.data) {
-            document.getElementById("triageOut").textContent =
-              `Triage succeeded but response was not JSON (HTTP ${res.status}). See Raw response.`;
-            return;
-          }
-
-          const data = parsed.data;
-          const hits = extractHits(data);
-          document.getElementById("triageOut").textContent = renderHits(hits);
-        } catch (e) {
-          document.getElementById("triageOut").textContent =
-            "Fetch failed (true network error).";
-          document.getElementById("createOut").textContent = String(e);
-        }
-      }
-    </script>
-  </body>
+    loadCases();
+  </script>
+</body>
 </html>
