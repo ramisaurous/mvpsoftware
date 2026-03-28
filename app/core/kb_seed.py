@@ -66,7 +66,7 @@ def seed_kb(session: Session) -> None:
             likely_causes=["Wheel bearing wear", "Hub assembly wear"],
             base_weight=1.0,
         ),
-    ]
+    
         TriageRule(
             name="Wheel/tire imbalance (highway vibration)",
             category="tires_wheels",
