@@ -53,7 +53,7 @@
         <textarea id="notes" placeholder="Any extra context..."></textarea>
 
         <div class="row" style="margin-top: 10px;">
-          <!-- KEY FIX: type="button" prevents a form submit/reload that wipes output -->
+          <!-- IMPORTANT: type="button" prevents accidental form submit/reload -->
           <button type="button" onclick="createCase()">Create</button>
           <button type="button" class="secondary" onclick="runTriage()">Run Triage (by Case ID)</button>
         </div>
@@ -89,8 +89,16 @@
         return (data?.triage?.hits ?? data?.case?.triage_snapshot?.hits ?? []);
       }
 
+      async function safeReadJson(res) {
+        const text = await res.text(); // always works
+        try {
+          return { ok: true, data: JSON.parse(text), raw: text };
+        } catch {
+          return { ok: false, data: null, raw: text };
+        }
+      }
+
       async function createCase() {
-        // Clear UI immediately so you can see something happened
         document.getElementById("triageOut").textContent = "Creating case...";
         document.getElementById("createOut").textContent = "{}";
 
@@ -110,14 +118,25 @@
             body: JSON.stringify(payload),
           });
 
-          const data = await res.json();
-          document.getElementById("createOut").textContent = j(data);
+          const parsed = await safeReadJson(res);
+
+          document.getElementById("createOut").textContent =
+            `HTTP ${res.status} ${res.statusText}\n\n` +
+            (parsed.ok ? j(parsed.data) : parsed.raw);
 
           if (!res.ok) {
             document.getElementById("triageOut").textContent =
-              `Create failed (${res.status}). See Raw response.`;
+              `Create failed (HTTP ${res.status}). See Raw response.`;
             return;
           }
+
+          if (!parsed.ok || !parsed.data) {
+            document.getElementById("triageOut").textContent =
+              `Create succeeded but response was not JSON (HTTP ${res.status}). See Raw response.`;
+            return;
+          }
+
+          const data = parsed.data;
 
           const caseId = data?.case?.id;
           if (caseId != null) document.getElementById("caseId").value = String(caseId);
@@ -126,7 +145,7 @@
           document.getElementById("triageOut").textContent = renderHits(hits);
         } catch (e) {
           document.getElementById("triageOut").textContent =
-            "Network error calling /api/cases. Open DevTools → Console/Network.";
+            "Fetch failed (true network error).";
           document.getElementById("createOut").textContent = String(e);
         }
       }
@@ -142,20 +161,30 @@
 
         try {
           const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/triage`, { method: "POST" });
-          const data = await res.json();
-          document.getElementById("createOut").textContent = j(data);
+          const parsed = await safeReadJson(res);
+
+          document.getElementById("createOut").textContent =
+            `HTTP ${res.status} ${res.statusText}\n\n` +
+            (parsed.ok ? j(parsed.data) : parsed.raw);
 
           if (!res.ok) {
             document.getElementById("triageOut").textContent =
-              `Triage failed (${res.status}). See Raw response.`;
+              `Triage failed (HTTP ${res.status}). See Raw response.`;
             return;
           }
 
+          if (!parsed.ok || !parsed.data) {
+            document.getElementById("triageOut").textContent =
+              `Triage succeeded but response was not JSON (HTTP ${res.status}). See Raw response.`;
+            return;
+          }
+
+          const data = parsed.data;
           const hits = extractHits(data);
           document.getElementById("triageOut").textContent = renderHits(hits);
         } catch (e) {
           document.getElementById("triageOut").textContent =
-            "Network error calling triage. Open DevTools → Console/Network.";
+            "Fetch failed (true network error).";
           document.getElementById("createOut").textContent = String(e);
         }
       }
