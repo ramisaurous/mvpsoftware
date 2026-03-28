@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GM Full-Size SUV AI Shop System</title>
   <style>
     body {
@@ -11,12 +11,17 @@
       background: #0f172a;
       color: #e5e7eb;
     }
-    h1, h2, h3 { margin-bottom: 10px; }
+
+    h1, h2, h3 {
+      margin-bottom: 10px;
+    }
+
     .grid {
       display: grid;
       grid-template-columns: 1.1fr 0.9fr;
       gap: 24px;
     }
+
     .card {
       background: #111827;
       border: 1px solid #374151;
@@ -24,6 +29,7 @@
       padding: 18px;
       margin-bottom: 18px;
     }
+
     input, textarea, button {
       width: 100%;
       box-sizing: border-box;
@@ -33,18 +39,26 @@
       border-radius: 10px;
       border: 1px solid #4b5563;
       background: #1f2937;
-      color: #fff;
+      color: #ffffff;
+      font-size: 14px;
     }
-    textarea { min-height: 90px; resize: vertical; }
+
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+
     button {
       cursor: pointer;
       font-weight: 700;
     }
+
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
     }
+
     .case-item {
       border: 1px solid #374151;
       border-radius: 12px;
@@ -53,11 +67,22 @@
       background: #0b1220;
       cursor: pointer;
     }
+
     .case-item:hover {
       border-color: #60a5fa;
       background: #111827;
     }
-    .muted { color: #9ca3af; font-size: 14px; }
+
+    .muted {
+      color: #9ca3af;
+      font-size: 14px;
+    }
+
+    .error {
+      color: #fca5a5;
+      font-weight: 600;
+    }
+
     pre {
       white-space: pre-wrap;
       word-wrap: break-word;
@@ -67,22 +92,10 @@
       padding: 14px;
       overflow-x: auto;
     }
-    .pill {
-      display: inline-block;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: #1e3a8a;
-      font-size: 12px;
-      margin-right: 6px;
-      margin-top: 6px;
-    }
+
     ul {
       margin-top: 8px;
-      padding-left: 18px;
-    }
-    .error {
-      color: #fca5a5;
-      font-weight: 600;
+      padding-left: 20px;
     }
   </style>
 </head>
@@ -104,13 +117,13 @@
         <input id="symptoms" placeholder="Symptoms (comma-separated)" />
         <textarea id="notes" placeholder="Notes (optional)"></textarea>
 
-        <button id="createBtn">Create Case</button>
+        <button id="createBtn" type="button">Create Case</button>
       </div>
 
       <div class="card">
         <h2>Run Triage</h2>
         <input id="caseId" placeholder="Case ID" />
-        <button id="triageBtn">Run Triage by Case ID</button>
+        <button id="triageBtn" type="button">Run Triage by Case ID</button>
       </div>
 
       <div class="card">
@@ -128,19 +141,22 @@
       <div class="card">
         <h2>Recent Cases</h2>
         <input id="vinFilter" placeholder="Filter by VIN (optional)" />
-        <button id="refreshCasesBtn">Refresh Cases</button>
+        <button id="refreshCasesBtn" type="button">Refresh Cases</button>
         <div id="caseList" class="muted">Loading cases...</div>
       </div>
     </div>
   </div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
+    function $(id) {
+      return document.getElementById(id);
+    }
 
     function splitCSV(value) {
+      if (!value) return [];
       return value
         .split(",")
-        .map(s => s.trim())
+        .map(function (s) { return s.trim(); })
         .filter(Boolean);
     }
 
@@ -148,7 +164,7 @@
       if (!value) return "";
       try {
         return new Date(value).toLocaleString();
-      } catch {
+      } catch (e) {
         return value;
       }
     }
@@ -157,90 +173,110 @@
       $("rawResponse").textContent = JSON.stringify(data, null, 2);
     }
 
-    function showError(message, data = null) {
-      $("triageResults").innerHTML = `<p class="error">${message}</p>`;
-      if (data) setRaw(data);
+    function showError(message, data) {
+      $("triageResults").innerHTML = '<p class="error">' + message + '</p>';
+      if (data) {
+        setRaw(data);
+      }
     }
 
     function renderTriage(data) {
-      const hits = data?.triage?.hits || data?.case?.triage_snapshot?.hits || [];
-      const container = document.getElementById("triageResults");
+      var hits = [];
+      if (data && data.triage && Array.isArray(data.triage.hits)) {
+        hits = data.triage.hits;
+      }
+
+      var container = $("triageResults");
 
       if (!hits.length) {
-      container.innerHTML = "<p class='muted'>No triage hits returned.</p>";
-      return;
+        container.innerHTML = '<p class="muted">No triage hits returned.</p>';
+        return;
+      }
+
+      var html = "";
+
+      hits.forEach(function (hit, index) {
+        var causes = Array.isArray(hit.likely_causes) ? hit.likely_causes : [];
+        var checks = Array.isArray(hit.checks) ? hit.checks : [];
+        var matched = Array.isArray(hit.matched) ? hit.matched : [];
+
+        var causesHtml = causes.length
+          ? "<ul>" + causes.map(function (c) { return "<li>" + c + "</li>"; }).join("") + "</ul>"
+          : "<ul><li>None</li></ul>";
+
+        var checksHtml = checks.length
+          ? "<ul>" + checks.map(function (c) { return "<li>" + c + "</li>"; }).join("") + "</ul>"
+          : "<ul><li>No checks returned</li></ul>";
+
+        html += ''
+          + '<div class="case-item" style="cursor:default;">'
+          +   '<strong>#' + (index + 1) + ' ' + (hit.name || 'Unnamed Rule') + '</strong>'
+          +   '<div class="muted">'
+          +     'Score: ' + (hit.score != null ? hit.score : 'n/a')
+          +     (matched.length ? ' | Matched: ' + matched.join(', ') : '')
+          +   '</div>'
+          +   '<div style="margin-top:10px;"><strong>Likely causes</strong></div>'
+          +   causesHtml
+          +   '<div style="margin-top:10px;"><strong>Suggested checks</strong></div>'
+          +   checksHtml
+          + '</div>';
+      });
+
+      container.innerHTML = html;
     }
-
-    container.innerHTML = hits.map((hit, i) => `
-    <div class="case-item" style="cursor:default;">
-      <strong>#${i + 1} ${hit.name || "Unnamed Rule"}</strong>
-      <div class="muted">
-        Score: ${hit.score ?? "n/a"}
-        ${hit.matched?.length ? ` | Matched: ${hit.matched.join(", ")}` : ""}
-      </div>
-
-      <div style="margin-top:10px;"><strong>Likely causes</strong></div>
-      <ul>
-        ${(hit.likely_causes || []).map(c => `<li>${c}</li>`).join("") || "<li>None</li>"}
-      </ul>
-
-      <div style="margin-top:10px;"><strong>Suggested checks</strong></div>
-      <ul>
-        ${(hit.checks || []).map(x => `<li>${x}</li>`).join("") || "<li>No checks returned</li>"}
-      </ul>
-    </div>
-  `).join("");
-}
-</script>
 
     async function loadCases() {
       try {
-        const vin = $("vinFilter").value.trim().toUpperCase();
-        let url = "/api/cases?limit=25";
-        if (vin) url += `&vin=${encodeURIComponent(vin)}`;
+        var vin = $("vinFilter").value.trim().toUpperCase();
+        var url = "/api/cases?limit=25";
+        if (vin) {
+          url += "&vin=" + encodeURIComponent(vin);
+        }
 
-        const res = await fetch(url);
-        const data = await res.json();
-        const rows = data.cases || [];
-        const list = $("caseList");
+        var res = await fetch(url);
+        var data = await res.json();
+        var rows = Array.isArray(data.cases) ? data.cases : [];
+        var list = $("caseList");
 
         if (!rows.length) {
-          list.innerHTML = "<p class='muted'>No cases found.</p>";
+          list.innerHTML = '<p class="muted">No cases found.</p>';
           return;
         }
 
-        list.innerHTML = rows.map(c => `
-          <div class="case-item" onclick="selectCase(${c.id})">
-            <strong>Case #${c.id}</strong>
-            <div class="muted">${fmtDate(c.created_at)}</div>
-            <div><strong>VIN:</strong> ${c.vin || ""}</div>
-            <div><strong>Engine:</strong> ${c.engine || "-"}</div>
-            <div><strong>Mileage:</strong> ${c.mileage ?? "-"}</div>
-            <div><strong>DTCs:</strong> ${(c.dtcs || []).join(", ") || "-"}</div>
-            <div><strong>Symptoms:</strong> ${(c.symptoms || []).join(", ") || "-"}</div>
-          </div>
-        `).join("");
+        var html = "";
+        rows.forEach(function (c) {
+          html += ''
+            + '<div class="case-item" onclick="selectCase(' + c.id + ')">'
+            +   '<strong>Case #' + c.id + '</strong>'
+            +   '<div class="muted">' + fmtDate(c.created_at) + '</div>'
+            +   '<div><strong>VIN:</strong> ' + (c.vin || '') + '</div>'
+            +   '<div><strong>Engine:</strong> ' + (c.engine || '-') + '</div>'
+            +   '<div><strong>Mileage:</strong> ' + (c.mileage != null ? c.mileage : '-') + '</div>'
+            +   '<div><strong>DTCs:</strong> ' + ((c.dtcs || []).join(", ") || '-') + '</div>'
+            +   '<div><strong>Symptoms:</strong> ' + ((c.symptoms || []).join(", ") || '-') + '</div>'
+            + '</div>';
+        });
+
+        list.innerHTML = html;
       } catch (err) {
-        $("caseList").innerHTML = `<p class="error">Failed to load cases.</p>`;
+        $("caseList").innerHTML = '<p class="error">Failed to load cases.</p>';
       }
     }
 
     async function selectCase(id) {
       try {
         $("caseId").value = id;
-        const res = await fetch(`/api/cases/${id}`);
-        const data = await res.json();
+        var res = await fetch("/api/cases/" + id);
+        var data = await res.json();
         setRaw(data);
       } catch (err) {
         showError("Failed to load selected case.");
       }
     }
 
-    window.selectCase = selectCase;
-
-    $("createBtn").addEventListener("click", async () => {
+    async function createCase() {
       try {
-        const payload = {
+        var payload = {
           vin: $("vin").value.trim(),
           engine: $("engine").value.trim() || null,
           mileage: $("mileage").value ? Number($("mileage").value) : null,
@@ -249,13 +285,13 @@
           notes: $("notes").value.trim() || null
         };
 
-        const res = await fetch("/api/cases", {
+        var res = await fetch("/api/cases", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
 
-        const data = await res.json();
+        var data = await res.json();
         setRaw(data);
 
         if (!res.ok) {
@@ -263,27 +299,30 @@
           return;
         }
 
-        if (data?.case?.id) {
+        if (data && data.case && data.case.id) {
           $("caseId").value = data.case.id;
         }
 
         renderTriage(data);
         await loadCases();
       } catch (err) {
-        showError("Create failed. Check console or backend logs.");
+        showError("Create failed. Check backend logs.");
       }
-    });
+    }
 
-    $("triageBtn").addEventListener("click", async () => {
+    async function runTriage() {
       try {
-        const caseId = $("caseId").value.trim();
+        var caseId = $("caseId").value.trim();
         if (!caseId) {
           showError("Enter or select a Case ID first.");
           return;
         }
 
-        const res = await fetch(`/api/cases/${caseId}/triage`, { method: "POST" });
-        const data = await res.json();
+        var res = await fetch("/api/cases/" + caseId + "/triage", {
+          method: "POST"
+        });
+
+        var data = await res.json();
         setRaw(data);
 
         if (!res.ok) {
@@ -294,13 +333,18 @@
         renderTriage(data);
         await loadCases();
       } catch (err) {
-        showError("Triage failed. Check console or backend logs.");
+        showError("Triage failed. Check backend logs.");
       }
+    }
+
+    window.selectCase = selectCase;
+
+    document.addEventListener("DOMContentLoaded", function () {
+      $("createBtn").addEventListener("click", createCase);
+      $("triageBtn").addEventListener("click", runTriage);
+      $("refreshCasesBtn").addEventListener("click", loadCases);
+      loadCases();
     });
-
-    $("refreshCasesBtn").addEventListener("click", loadCases);
-
-    loadCases();
   </script>
 </body>
 </html>
