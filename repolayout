@@ -1,0 +1,31 @@
+# Repo layout (drop these files into your GitHub repo)
+
+gm_suv_shop_grade/
+  requirements.txt
+  Procfile
+  railway.json
+  app/
+    __init__.py
+    main.py
+    core/
+      __init__.py
+      config.py
+      db.py
+      triage.py
+      vin.py
+      scan_parser.py
+    models/
+      __init__.py
+      case.py
+    routers/
+      __init__.py
+      cases.py
+      scans.py
+      actions.py
+      uploads.py
+    static/
+      app.css
+    templates/
+      index.html
+    storage/
+      .gitkeep
