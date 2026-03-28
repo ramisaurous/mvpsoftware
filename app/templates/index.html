@@ -20,6 +20,7 @@
       .muted { opacity: 0.75; font-size: 13px; }
     </style>
   </head>
+
   <body>
     <h1>GM Full-Size SUV AI Shop System</h1>
     <div class="muted">VIN intake → DTC/symptoms → triage suggestions</div>
@@ -52,8 +53,9 @@
         <textarea id="notes" placeholder="Any extra context..."></textarea>
 
         <div class="row" style="margin-top: 10px;">
-          <button onclick="createCase()">Create</button>
-          <button class="secondary" onclick="runTriage()">Run Triage (by Case ID)</button>
+          <!-- KEY FIX: type="button" prevents a form submit/reload that wipes output -->
+          <button type="button" onclick="createCase()">Create</button>
+          <button type="button" class="secondary" onclick="runTriage()">Run Triage (by Case ID)</button>
         </div>
 
         <label for="caseId" style="margin-top: 12px;">Case ID (auto-filled after Create)</label>
@@ -84,14 +86,14 @@
       }
 
       function extractHits(data) {
-        return (
-          data?.triage?.hits ??
-          data?.case?.triage_snapshot?.hits ??
-          []
-        );
+        return (data?.triage?.hits ?? data?.case?.triage_snapshot?.hits ?? []);
       }
 
       async function createCase() {
+        // Clear UI immediately so you can see something happened
+        document.getElementById("triageOut").textContent = "Creating case...";
+        document.getElementById("createOut").textContent = "{}";
+
         const payload = {
           vin: document.getElementById("vin").value,
           engine: document.getElementById("engine").value || null,
@@ -101,20 +103,32 @@
           notes: document.getElementById("notes").value || null,
         };
 
-        const res = await fetch("/api/cases", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
+        try {
+          const res = await fetch("/api/cases", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
 
-        const data = await res.json();
-        document.getElementById("createOut").textContent = j(data);
+          const data = await res.json();
+          document.getElementById("createOut").textContent = j(data);
 
-        const caseId = data?.case?.id;
-        if (caseId != null) document.getElementById("caseId").value = String(caseId);
+          if (!res.ok) {
+            document.getElementById("triageOut").textContent =
+              `Create failed (${res.status}). See Raw response.`;
+            return;
+          }
 
-        const hits = extractHits(data);
-        document.getElementById("triageOut").textContent = renderHits(hits);
+          const caseId = data?.case?.id;
+          if (caseId != null) document.getElementById("caseId").value = String(caseId);
+
+          const hits = extractHits(data);
+          document.getElementById("triageOut").textContent = renderHits(hits);
+        } catch (e) {
+          document.getElementById("triageOut").textContent =
+            "Network error calling /api/cases. Open DevTools → Console/Network.";
+          document.getElementById("createOut").textContent = String(e);
+        }
       }
 
       async function runTriage() {
@@ -124,12 +138,26 @@
           return;
         }
 
-        const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/triage`, { method: "POST" });
-        const data = await res.json();
+        document.getElementById("triageOut").textContent = "Running triage...";
 
-        document.getElementById("createOut").textContent = j(data);
-        const hits = extractHits(data);
-        document.getElementById("triageOut").textContent = renderHits(hits);
+        try {
+          const res = await fetch(`/api/cases/${encodeURIComponent(caseId)}/triage`, { method: "POST" });
+          const data = await res.json();
+          document.getElementById("createOut").textContent = j(data);
+
+          if (!res.ok) {
+            document.getElementById("triageOut").textContent =
+              `Triage failed (${res.status}). See Raw response.`;
+            return;
+          }
+
+          const hits = extractHits(data);
+          document.getElementById("triageOut").textContent = renderHits(hits);
+        } catch (e) {
+          document.getElementById("triageOut").textContent =
+            "Network error calling triage. Open DevTools → Console/Network.";
+          document.getElementById("createOut").textContent = String(e);
+        }
       }
     </script>
   </body>
