@@ -68,6 +68,9 @@ def create_case(payload: CaseCreateIn) -> dict[str, Any]:
             case.symptoms,
             case.platform,
             case.engine,
+            year=case.year,
+            make=case.make,
+            model_family=case.model_family,
             learned_weights=learned,
         )
         case.triage_snapshot = {"hits": [h.__dict__ for h in hits]}
